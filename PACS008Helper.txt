@@ -1,0 +1,111 @@
+using System;
+using System.Globalization;
+using System.Numerics;
+using System.Text;
+using System.Text.RegularExpressions;
+
+public static class CbprFormatter
+{
+    // --- Existing methods from previous class ---
+    public static string FormatAmount(decimal amount, string currency)
+    {
+        int decimals = GetCurrencyDecimals(currency);
+        return Math.Round(amount, decimals)
+            .ToString($"F{decimals}", CultureInfo.InvariantCulture);
+    }
+
+    public static string FormatDate(DateTime date)
+    {
+        return date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    }
+
+    public static string FormatDateTimeUtc(DateTime dateTime)
+    {
+        return dateTime.ToUniversalTime()
+            .ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+    }
+
+    public static string FormatBoolean(bool value) => value ? "true" : "false";
+
+    public static string FormatBic(string bic)
+    {
+        if (string.IsNullOrWhiteSpace(bic))
+            throw new ArgumentException("BIC cannot be empty.");
+        bic = bic.Trim().ToUpperInvariant();
+        if (bic.Length == 8) return bic + "XXX";
+        if (bic.Length == 11) return bic;
+        throw new ArgumentException("BIC must be 8 or 11 characters.");
+    }
+
+    public static string FormatIban(string iban)
+    {
+        if (string.IsNullOrWhiteSpace(iban))
+            throw new ArgumentException("IBAN cannot be empty.");
+        iban = iban.Replace(" ", "").ToUpperInvariant();
+        if (iban.Length < 15 || iban.Length > 34)
+            throw new ArgumentException("IBAN length invalid.");
+
+        string rearranged = iban.Substring(4) + iban.Substring(0, 4);
+        StringBuilder sb = new();
+        foreach (char c in rearranged)
+            sb.Append(char.IsLetter(c) ? (c - 'A' + 10).ToString() : c.ToString());
+        if (BigInteger.Parse(sb.ToString()) % 97 != 1)
+            throw new ArgumentException("Invalid IBAN checksum.");
+        return iban;
+    }
+
+    public static string FormatLei(string lei)
+    {
+        if (string.IsNullOrWhiteSpace(lei) || lei.Length != 20)
+            throw new ArgumentException("LEI must be 20 characters.");
+        return lei.ToUpperInvariant();
+    }
+
+    public static string SanitizeText(string input)
+    {
+        if (input == null) return null;
+        var regex = new Regex(@"[^A-Za-z0-9\s\.,\-\/\?:\(\)\+_]", RegexOptions.Compiled);
+        return regex.Replace(input, "");
+    }
+
+    private static int GetCurrencyDecimals(string currency)
+    {
+        return currency.ToUpperInvariant() switch
+        {
+            "JPY" => 0,
+            "KWD" => 3,
+            "BHD" => 3,
+            "OMR" => 3,
+            _ => 2,
+        };
+    }
+
+    // --- NEW: UETR and MessageId ---
+
+    /// <summary>
+    /// Generates a new UETR (UUID v4) for CBPR+ pacs.008/009.
+    /// </summary>
+    public static string GenerateUetr()
+    {
+        return Guid.NewGuid().ToString(); // lowercase by default
+    }
+
+    /// <summary>
+    /// Formats a MessageId safely for CBPR+ (max 35 chars, letters/digits/-, /, ., _)
+    /// </summary>
+    public static string FormatMessageId(string msgId)
+    {
+        if (string.IsNullOrWhiteSpace(msgId))
+            throw new ArgumentException("MessageId cannot be empty.");
+
+        // Sanitize allowed chars
+        msgId = SanitizeText(msgId);
+        // Replace spaces with underscores
+        msgId = msgId.Replace(" ", "_");
+        // Truncate if > 35
+        if (msgId.Length > 35)
+            msgId = msgId.Substring(0, 35);
+
+        return msgId;
+    }
+}
