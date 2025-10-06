@@ -1,0 +1,56 @@
+namespace YourNamespace.Dtos.Swift
+{
+    /// <summary>
+    /// Represents the result of a validation operation
+    /// Used throughout SWIFT DTO validation
+    /// </summary>
+    public class ValidationResult
+    {
+        /// <summary>
+        /// Indicates whether the validation was successful
+        /// </summary>
+        public bool IsSuccess { get; private set; }
+        
+        /// <summary>
+        /// Error message if validation failed
+        /// Null if validation succeeded
+        /// </summary>
+        public string ErrorMessage { get; private set; }
+        
+        private ValidationResult(bool isSuccess, string errorMessage)
+        {
+            IsSuccess = isSuccess;
+            ErrorMessage = errorMessage;
+        }
+        
+        /// <summary>
+        /// Creates a successful validation result
+        /// </summary>
+        public static ValidationResult Success()
+        {
+            return new ValidationResult(true, null);
+        }
+        
+        /// <summary>
+        /// Creates a failed validation result with an error message
+        /// </summary>
+        /// <param name="errorMessage">Description of why validation failed</param>
+        public static ValidationResult Fail(string errorMessage)
+        {
+            return new ValidationResult(false, errorMessage);
+        }
+        
+        /// <summary>
+        /// Implicit conversion to bool for easy checking
+        /// </summary>
+        public static implicit operator bool(ValidationResult result)
+        {
+            return result.IsSuccess;
+        }
+        
+        public override string ToString()
+        {
+            return IsSuccess ? "Success" : $"Failed: {ErrorMessage}";
+        }
+    }
+}
