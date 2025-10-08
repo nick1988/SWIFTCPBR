@@ -1,0 +1,67 @@
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.057.001.06" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <NtfctnToRcv>
+    <GrpHdr>
+      {{~ include 'GrpHdr_Camt' GroupHeader ~}}
+    </GrpHdr>
+    <Ntfctn>
+      <Id>{{ NotificationId }}</Id>
+      {{~ if Account ~}}
+      <Acct>
+        {{~ include 'Acct' Account ~}}
+      </Acct>
+      {{~ end ~}}
+      {{~ if AccountOwner ~}}
+      <AcctOwnr>
+        <Agt>
+          <FinInstnId>
+            {{~ include 'FinInstnId' AccountOwner.FinInstnId ~}}
+          </FinInstnId>
+        </Agt>
+      </AcctOwnr>
+      {{~ end ~}}
+      {{~ if AccountServicer ~}}
+      <AcctSvcr>
+        <FinInstnId>
+          {{~ include 'FinInstnId' AccountServicer.FinInstnId ~}}
+        </FinInstnId>
+      </AcctSvcr>
+      {{~ end ~}}
+      <Itm>
+        <Id>{{ Item.Id }}</Id>
+        {{~ if Item.EndToEndId ~}}
+        <EndToEndId>{{ Item.EndToEndId }}</EndToEndId>
+        {{~ end ~}}
+        {{~ if Item.UETR ~}}
+        <UETR>{{ Item.UETR }}</UETR>
+        {{~ end ~}}
+        <Amt Ccy="{{ Item.Amount.Ccy }}">{{ Item.Amount.ValueFormatted }}</Amt>
+        <XpctdValDt>{{ Item.ExpectedValueDateFormatted }}</XpctdValDt>
+        <Dbtr>
+          {{~ if Item.Debtor.Party ~}}
+          {{~ include 'Party' Item.Debtor.Party ~}}
+          {{~ else if Item.Debtor.Agent ~}}
+          <Agt>
+            <FinInstnId>
+              {{~ include 'FinInstnId' Item.Debtor.Agent.FinInstnId ~}}
+            </FinInstnId>
+          </Agt>
+          {{~ end ~}}
+        </Dbtr>
+        {{~ if Item.DebtorAgent ~}}
+        <DbtrAgt>
+          <FinInstnId>
+            {{~ include 'FinInstnId' Item.DebtorAgent.FinInstnId ~}}
+          </FinInstnId>
+        </DbtrAgt>
+        {{~ end ~}}
+        {{~ if Item.IntermediaryAgent ~}}
+        <IntrmyAgt>
+          <FinInstnId>
+            {{~ include 'FinInstnId' Item.IntermediaryAgent.FinInstnId ~}}
+          </FinInstnId>
+        </IntrmyAgt>
+        {{~ end ~}}
+      </Itm>
+    </Ntfctn>
+  </NtfctnToRcv>
+</Document>

@@ -1,0 +1,84 @@
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <FIToFICstmrCdtTrf>
+    <GrpHdr>
+      {{~ include 'GrpHdr_Pacs' GroupHeader ~}}
+    </GrpHdr>
+    <CdtTrfTxInf>
+      {{~ include 'PmtId' PaymentId ~}}
+      {{~ include 'PmtTpInf' PaymentTypeInfo ~}}
+      <IntrBkSttlmAmt Ccy="{{ SettlementAmount.Ccy }}">{{ SettlementAmount.ValueFormatted }}</IntrBkSttlmAmt>
+      <IntrBkSttlmDt>{{ SettlementDateFormatted }}</IntrBkSttlmDt>
+      <InstdAmt Ccy="{{ InstructedAmount.Ccy }}">{{ InstructedAmount.ValueFormatted }}</InstdAmt>
+      <ChrgBr>{{ ChargeBearer }}</ChrgBr>
+      <InstgAgt>
+        <FinInstnId>
+          {{~ include 'FinInstnId' InstructingAgent.FinInstnId ~}}
+        </FinInstnId>
+      </InstgAgt>
+      <InstdAgt>
+        <FinInstnId>
+          {{~ include 'FinInstnId' InstructedAgent.FinInstnId ~}}
+        </FinInstnId>
+      </InstdAgt>
+      {{~ if IntermediaryAgent1 ~}}
+      <IntrmyAgt1>
+        <FinInstnId>
+          {{~ include 'FinInstnId' IntermediaryAgent1.FinInstnId ~}}
+        </FinInstnId>
+      </IntrmyAgt1>
+      <IntrmyAgt1Acct>
+        {{~ include 'Acct' IntermediaryAgent1Account ~}}
+      </IntrmyAgt1Acct>
+      {{~ end ~}}
+      <Dbtr>
+        {{~ include 'Party' Debtor ~}}
+      </Dbtr>
+      {{~ if DebtorAccount ~}}
+      <DbtrAcct>
+        {{~ include 'Acct' DebtorAccount ~}}
+      </DbtrAcct>
+      {{~ end ~}}
+      <DbtrAgt>
+        <FinInstnId>
+          {{~ include 'FinInstnId' DebtorAgent.FinInstnId ~}}
+        </FinInstnId>
+      </DbtrAgt>
+      {{~ if CreditorAgent ~}}
+      <CdtrAgt>
+        <FinInstnId>
+          {{~ include 'FinInstnId' CreditorAgent.FinInstnId ~}}
+        </FinInstnId>
+      </CdtrAgt>
+      <CdtrAgtAcct>
+        {{~ include 'Acct' CreditorAgentAccount ~}}
+      </CdtrAgtAcct>
+      {{~ end ~}}
+      <Cdtr>
+        {{~ include 'Party' Creditor ~}}
+      </Cdtr>
+      <CdtrAcct>
+        {{~ include 'Acct' CreditorAccount ~}}
+      </CdtrAcct>
+      {{~ if InstrForCdtrAgt ~}}
+      <InstrForCdtrAgt>
+        <InstrInf>{{ InstrForCdtrAgt }}</InstrInf>
+      </InstrForCdtrAgt>
+      {{~ end ~}}
+      {{~ if InstrForNxtAgt ~}}
+      <InstrForNxtAgt>
+        <InstrInf>{{ InstrForNxtAgt }}</InstrInf>
+      </InstrForNxtAgt>
+      {{~ end ~}}
+      {{~ if Purpose ~}}
+      <Purp>
+        <Cd>{{ Purpose }}</Cd>
+      </Purp>
+      {{~ end ~}}
+      {{~ if RemittanceInfo ~}}
+      <RmtInf>
+        <Ustrd>{{ RemittanceInfo }}</Ustrd>
+      </RmtInf>
+      {{~ end ~}}
+    </CdtTrfTxInf>
+  </FIToFICstmrCdtTrf>
+</Document>
