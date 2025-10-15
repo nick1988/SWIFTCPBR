@@ -1,0 +1,173 @@
+namespace SwiftMessageProcessor.Core.Models;
+
+/// <summary>
+/// Common payment data shared across pacs messages (pacs.008, pacs.009, etc.)
+/// Encapsulates the core payment information that's consistent across message types
+/// Updated annually with SWIFT standards releases
+/// </summary>
+public class PaymentCoreData
+{
+    // ========== Financial Information ==========
+    
+    /// <summary>
+    /// Currency code (ISO 4217 3-letter code)
+    /// Example: "GBP", "USD", "EUR"
+    /// Mandatory
+    /// </summary>
+    public string Currency { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Payment amount
+    /// Mandatory
+    /// </summary>
+    public decimal Amount { get; set; }
+    
+    /// <summary>
+    /// Value date for the payment (settlement date)
+    /// Mandatory
+    /// </summary>
+    public DateTime ValueDate { get; set; }
+    
+    // ========== Identification ==========
+    
+    /// <summary>
+    /// Message Identifier - unique reference for this message
+    /// Used in GroupHeader.MsgId
+    /// Mandatory - Max 35 characters
+    /// </summary>
+    public string MessageIdentifier { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// End-to-End Identification - unique reference from originator to beneficiary
+    /// Mandatory - Max 35 characters
+    /// </summary>
+    public string EndToEndId { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Unique End-to-End Transaction Reference (UETR)
+    /// UUID format per ISO 20022
+    /// Optional
+    /// </summary>
+    public string? UETR { get; set; }
+    
+    // ========== Instructions (Free Text) ==========
+    
+    /// <summary>
+    /// Instruction for Creditor Agent
+    /// Free text instructions for the creditor's agent
+    /// Optional - Max 140 characters
+    /// </summary>
+    public string? InstructionForCreditorAgent { get; set; }
+    
+    /// <summary>
+    /// Instruction for Next Agent
+    /// Free text instructions for the next agent in the chain
+    /// Similar to MT72 in legacy SWIFT
+    /// Optional - Max 140 characters
+    /// </summary>
+    public string? InstructionForNextAgent { get; set; }
+    
+    /// <summary>
+    /// Remittance Information (unstructured)
+    /// Free text payment description/reference
+    /// Optional - Max 140 characters
+    /// </summary>
+    public string? RemittanceInformation { get; set; }
+    
+    // ========== Purpose ==========
+    
+    /// <summary>
+    /// Category Purpose - high-level categorization
+    /// Example: "CASH" (Cash Management), "TREA" (Treasury)
+    /// Optional - Uses ISO Purpose Code external code set
+    /// </summary>
+    public string? CategoryPurpose { get; set; }
+    
+    /// <summary>
+    /// Purpose - specific purpose of the payment
+    /// Example: "LOAN" (Loan), "INTC" (Intra-Company)
+    /// Optional - Uses ISO Purpose Code external code set
+    /// Note: Bank of England requirement for certain payment types
+    /// </summary>
+    public string? Purpose { get; set; }
+    
+    // ========== Payment Type Information ==========
+    
+    /// <summary>
+    /// Instruction Priority
+    /// Example: "NORM" (Normal), "HIGH" (High Priority), "URGP" (Urgent)
+    /// Optional
+    /// </summary>
+    public string? Priority { get; set; }
+    
+    /// <summary>
+    /// Service Level Code
+    /// Example: "SEPA" (SEPA), "URGP" (Urgent Payment), "SDVA" (Same Day Value)
+    /// Optional
+    /// </summary>
+    public string? ServiceLevel { get; set; }
+    
+    // ========== Routing ==========
+    
+    /// <summary>
+    /// Payment Chain ID - reference to payment chain in database
+    /// Used to retrieve debtor/creditor/agent information
+    /// Mandatory
+    /// </summary>
+    public int PaymentChainId { get; set; }
+    
+    // ========== Validation ==========
+    
+    /// <summary>
+    /// Validates the core payment data
+    /// </summary>
+    public ValidationResult Validate()
+    {
+        // Currency validation
+        if (string.IsNullOrEmpty(Currency))
+            return ValidationResult.Fail("Currency is mandatory");
+        
+        if (Currency.Length != 3)
+            return ValidationResult.Fail("Currency must be a 3-letter ISO 4217 code");
+        
+        // Amount validation
+        if (Amount <= 0)
+            return ValidationResult.Fail("Amount must be greater than zero");
+        
+        // Date validation
+        if (ValueDate == default(DateTime))
+            return ValidationResult.Fail("ValueDate is mandatory");
+        
+        // Identifier validation
+        if (string.IsNullOrEmpty(MessageIdentifier))
+            return ValidationResult.Fail("MessageIdentifier is mandatory");
+        
+        if (MessageIdentifier.Length > 35)
+            return ValidationResult.Fail("MessageIdentifier exceeds 35 character limit");
+        
+        if (string.IsNullOrEmpty(EndToEndId))
+            return ValidationResult.Fail("EndToEndId is mandatory");
+        
+        if (EndToEndId.Length > 35)
+            return ValidationResult.Fail("EndToEndId exceeds 35 character limit");
+        
+        // Optional field length validations
+        if (!string.IsNullOrEmpty(InstructionForCreditorAgent) && 
+            InstructionForCreditorAgent.Length > 140)
+            return ValidationResult.Fail("InstructionForCreditorAgent exceeds 140 character limit");
+        
+        if (!string.IsNullOrEmpty(InstructionForNextAgent) && 
+            InstructionForNextAgent.Length > 140)
+            return ValidationResult.Fail("InstructionForNextAgent exceeds 140 character limit");
+        
+        if (!string.IsNullOrEmpty(RemittanceInformation) && 
+            RemittanceInformation.Length > 140)
+            return ValidationResult.Fail("RemittanceInformation exceeds 140 character limit");
+        
+        // Payment Chain validation
+        if (PaymentChainId <= 0)
+            return ValidationResult.Fail("PaymentChainId must be a positive integer");
+        
+        return ValidationResult.Success();
+    }
+}

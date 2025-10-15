@@ -1,0 +1,67 @@
+namespace SwiftMessageProcessor.Core.Models;
+
+/// <summary>
+/// Payload data for pacs.008 messages
+/// Deserialized from ISwiftMessageRequest.PayloadJson
+/// Contains pacs.008-specific fields + common payment data
+/// </summary>
+public class Pacs008PayloadData
+{
+    /// <summary>
+    /// Core payment data shared across pacs messages
+    /// Mandatory
+    /// </summary>
+    public PaymentCoreData Payment { get; set; } = new();
+    
+    // ========== pacs.008 Specific Fields ==========
+    
+    /// <summary>
+    /// Ultimate Debtor - the actual party initiating the payment
+    /// (when debtor is acting as agent for ultimate debtor)
+    /// Optional
+    /// </summary>
+    public string? UltimateDebtorName { get; set; }
+    
+    /// <summary>
+    /// Ultimate Creditor - the actual beneficiary party
+    /// (when creditor is acting as agent for ultimate creditor)
+    /// Optional
+    /// </summary>
+    public string? UltimateCreditorName { get; set; }
+    
+    /// <summary>
+    /// Debtor Reference - customer reference from debtor
+    /// Optional - Max 35 characters
+    /// </summary>
+    public string? DebtorReference { get; set; }
+    
+    /// <summary>
+    /// Charge Bearer - who bears the charges
+    /// Values: "DEBT" (debtor), "CRED" (creditor), "SHAR" (shared), "SLEV" (service level)
+    /// Optional - defaults to "SHAR" if not specified
+    /// </summary>
+    public string? ChargeBearer { get; set; }
+    
+    /// <summary>
+    /// Validates the pacs.008 payload
+    /// </summary>
+    public ValidationResult Validate()
+    {
+        if (Payment == null)
+            return ValidationResult.Fail("Payment core data is mandatory");
+        
+        var coreValidation = Payment.Validate();
+        if (!coreValidation.IsSuccess)
+            return coreValidation;
+        
+        // pacs.008-specific validation
+        if (!string.IsNullOrEmpty(DebtorReference) && DebtorReference.Length > 35)
+            return ValidationResult.Fail("DebtorReference exceeds 35 character limit");
+        
+        if (!string.IsNullOrEmpty(ChargeBearer) && 
+            !new[] { "DEBT", "CRED", "SHAR", "SLEV" }.Contains(ChargeBearer))
+            return ValidationResult.Fail("ChargeBearer must be DEBT, CRED, SHAR, or SLEV");
+        
+        return ValidationResult.Success();
+    }
+}

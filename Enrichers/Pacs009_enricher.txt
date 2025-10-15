@@ -1,0 +1,469 @@
+namespace SwiftMessageProcessor.Core.Services.Enrichers;
+
+public interface IPacs009Enricher : IEnricher<Pacs009Dto, ISwiftMessageRequest>
+{
+}
+
+public class Pacs009Enricher : IPacs009Enricher
+{
+    private readonly IDataAccess _dataAccess;
+    private readonly IGroupHeaderEnricher _groupHeaderEnricher;
+    private readonly ILogger<Pacs009Enricher> _logger;
+    
+    public Pacs009Enricher(
+        IDataAccess dataAccess,
+        IGroupHeaderEnricher groupHeaderEnricher,
+        ILogger<Pacs009Enricher> logger)
+    {
+        _dataAccess = dataAccess;
+        _groupHeaderEnricher = groupHeaderEnricher;
+        _logger = logger;
+    }
+    
+public async Task EnrichAsync(
+    Pacs009Dto dto,
+    ISwiftMessageRequest request,
+    CancellationToken cancellationToken = default)
+{
+    _logger.LogDebug("Enriching pacs.009 for Request {RequestId}", request.RequestId);
+    
+    try
+    {
+        // 1. Deserialize and validate PayloadJson
+        var payload = DeserializePayload(request.PayloadJson);
+        
+        // 2. Fetch payment chain from database
+        var paymentChain = await GetPaymentChainAsync(
+            payload.Payment.PaymentChainId, 
+            cancellationToken);
+        
+        // 3. Enrich Group Header
+        dto.GroupHeader = new GroupHeaderPacsDto();
+        await _groupHeaderEnricher.EnrichAsync(
+            dto.GroupHeader, 
+            request,
+            payload.Payment.MessageIdentifier,
+            cancellationToken);
+        
+        // 4. Payment Identification
+        dto.PaymentId = EnrichPaymentId(payload.Payment);
+        
+        // 5. Settlement Information
+        dto.SettlementAmount = EnrichSettlementAmount(payload.Payment);
+        dto.SettlementDate = payload.Payment.ValueDate;
+        
+        // 6. Instructing and Instructed Agents
+        dto.InstructingAgent = EnrichInstructingAgent(paymentChain);
+        dto.InstructedAgent = EnrichInstructedAgent(paymentChain);
+        
+        // 7. Debtor (your institution)
+        dto.Debtor = EnrichDebtor(paymentChain);
+        dto.DebtorAgent = EnrichDebtorAgent(paymentChain);
+        
+        // 8. Creditor (beneficiary FI)
+        dto.Creditor = EnrichCreditor(paymentChain);
+        dto.CreditorAccount = EnrichCreditorAccount(paymentChain);
+        
+        // 9. Optional Creditor Agent
+        if (HasCreditorAgent(paymentChain))
+        {
+            dto.CreditorAgent = EnrichCreditorAgent(paymentChain);
+            
+            if (HasCreditorAgentAccount(paymentChain))
+            {
+                dto.CreditorAgentAccount = EnrichCreditorAgentAccount(paymentChain);
+            }
+        }
+        
+        // 10. Optional Intermediary Agent 1
+        if (HasIntermediaryAgent1(paymentChain))
+        {
+            dto.IntermediaryAgent1 = EnrichIntermediaryAgent1(paymentChain);
+            dto.IntermediaryAgent1Account = EnrichIntermediaryAgent1Account(paymentChain);
+        }
+        
+        // 11. Optional instruction fields from payload
+        dto.InstrForCdtrAgt = payload.Payment.InstructionForCreditorAgent;
+        dto.InstrForNxtAgt = payload.Payment.InstructionForNextAgent;
+        dto.RemittanceInfo = payload.Payment.RemittanceInformation;
+        dto.Purpose = payload.Payment.Purpose;
+        
+        // 12. Payment Type Information (optional)
+        if (HasPaymentTypeInfo(payload.Payment))
+        {
+            dto.PaymentTypeInfo = EnrichPaymentTypeInfo(payload.Payment);
+        }
+        
+        _logger.LogInformation(
+            "Successfully enriched pacs.009 for Request {RequestId}, PaymentChain {PaymentChainId}", 
+            request.RequestId, 
+            payload.Payment.PaymentChainId);
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, 
+            "Failed to enrich pacs.009 for Request {RequestId}", 
+            request.RequestId);
+        throw;
+    }
+}
+
+    
+    // ========== Deserialization ==========
+    
+    private Pacs009PayloadData DeserializePayload(string payloadJson)
+    {
+        if (string.IsNullOrWhiteSpace(payloadJson))
+            throw new InvalidOperationException("PayloadJson cannot be null or empty");
+        
+        try
+        {
+            var payload = JsonSerializer.Deserialize<Pacs009PayloadData>(
+                payloadJson, 
+                new JsonSerializerOptions 
+                { 
+                    PropertyNameCaseInsensitive = true,
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                });
+            
+            if (payload == null)
+                throw new InvalidOperationException("Failed to deserialize pacs.009 payload");
+            
+            // Validate immediately after deserialization
+            var validation = payload.Validate();
+            if (!validation.IsSuccess)
+            {
+                _logger.LogWarning(
+                    "Payload validation failed: {ErrorMessage}", 
+                    validation.ErrorMessage);
+                throw new InvalidOperationException(
+                    $"Invalid pacs.009 payload: {validation.ErrorMessage}");
+            }
+            
+            return payload;
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "Failed to deserialize pacs.009 payload JSON");
+            throw new InvalidOperationException("Invalid pacs.009 payload JSON format", ex);
+        }
+    }
+    
+    // ========== Database Access ==========
+    
+    private async Task<PaymentChainData> GetPaymentChainAsync(
+        int paymentChainId, 
+        CancellationToken cancellationToken)
+    {
+        _logger.LogDebug("Fetching payment chain {PaymentChainId}", paymentChainId);
+        
+        var parameters = new SqlParameter[]
+        {
+            new SqlParameter("@PaymentChainId", paymentChainId)
+        };
+        
+        var result = await _dataAccess.ExecuteQuerySingleAsync<PaymentChainData>(
+            "usp_GetPaymentChainDetails",
+            parameters,
+            cancellationToken);
+        
+        if (result == null)
+        {
+            _logger.LogError(
+                "Payment chain {PaymentChainId} not found in database", 
+                paymentChainId);
+            throw new InvalidOperationException(
+                $"Payment chain {paymentChainId} not found");
+        }
+        
+        // Validate required fields from payment chain
+        ValidatePaymentChain(result);
+        
+        return result;
+    }
+    
+    private void ValidatePaymentChain(PaymentChainData chain)
+    {
+        // CBPR+ Rule: All agents on SWIFT must have BIC
+        if (string.IsNullOrEmpty(chain.InstructingAgentBIC))
+            throw new InvalidOperationException("InstructingAgentBIC is mandatory");
+        
+        if (string.IsNullOrEmpty(chain.InstructedAgentBIC))
+            throw new InvalidOperationException("InstructedAgentBIC is mandatory");
+        
+        if (string.IsNullOrEmpty(chain.DebtorBIC))
+            throw new InvalidOperationException("DebtorBIC is mandatory");
+        
+        if (string.IsNullOrEmpty(chain.DebtorAgentBIC))
+            throw new InvalidOperationException("DebtorAgentBIC is mandatory");
+        
+        // Creditor must have BIC OR Name+Address
+        if (string.IsNullOrEmpty(chain.CreditorBIC) && 
+            string.IsNullOrEmpty(chain.CreditorName))
+        {
+            throw new InvalidOperationException(
+                "Creditor must have either BIC or Name+Address");
+        }
+        
+        // Creditor account is mandatory
+        if (string.IsNullOrEmpty(chain.CreditorAccountIBAN) && 
+            string.IsNullOrEmpty(chain.CreditorAccountOther))
+        {
+            throw new InvalidOperationException("Creditor account is mandatory");
+        }
+        
+        // Business rule: If intermediary agent exists, account is mandatory
+        var hasIntermediaryAgent = !string.IsNullOrEmpty(chain.IntermediaryAgent1BIC) || 
+                                    !string.IsNullOrEmpty(chain.IntermediaryAgent1Name);
+        
+        var hasIntermediaryAccount = !string.IsNullOrEmpty(chain.IntermediaryAgent1AccountIBAN) || 
+                                      !string.IsNullOrEmpty(chain.IntermediaryAgent1AccountOther);
+        
+        if (hasIntermediaryAgent && !hasIntermediaryAccount)
+        {
+            throw new InvalidOperationException(
+                "IntermediaryAgent1Account is mandatory when IntermediaryAgent1 is present");
+        }
+    }
+    
+    // ========== Enrichment Methods ==========
+    
+    private PaymentIdentificationDto EnrichPaymentId(PaymentCoreData payment)
+    {
+        return new PaymentIdentificationDto
+        {
+            InstrId = payment.MessageIdentifier,
+            EndToEndId = payment.EndToEndId,
+            UETR = payment.UETR
+        };
+    }
+    
+    private AmountDto EnrichSettlementAmount(PaymentCoreData payment)
+    {
+        return new AmountDto
+        {
+            Ccy = payment.Currency,
+            Value = payment.Amount
+        };
+    }
+    
+    private AgentDto EnrichInstructingAgent(PaymentChainData chain)
+    {
+        // Always your BIC, always just BIC (no name/address per CBPR+)
+        return new AgentDto
+        {
+            BIC = chain.InstructingAgentBIC
+        };
+    }
+    
+    private AgentDto EnrichInstructedAgent(PaymentChainData chain)
+    {
+        // Nostro bank BIC
+        return new AgentDto
+        {
+            BIC = chain.InstructedAgentBIC
+        };
+    }
+    
+    private AgentDto EnrichDebtor(PaymentChainData chain)
+    {
+        // Your BIC (same as instructing agent for pacs.009)
+        return new AgentDto
+        {
+            BIC = chain.DebtorBIC
+        };
+    }
+    
+    private AgentDto EnrichDebtorAgent(PaymentChainData chain)
+    {
+        // Nostro bank (same as instructed agent)
+        return new AgentDto
+        {
+            BIC = chain.DebtorAgentBIC
+        };
+    }
+    
+    private AgentDto EnrichCreditor(PaymentChainData chain)
+    {
+        // Beneficiary FI - could be BIC or Name+Address
+        var agent = new AgentDto();
+        
+        if (!string.IsNullOrEmpty(chain.CreditorBIC))
+        {
+            // CBPR+ Rule: If BIC present, use only BIC (no name/address)
+            agent.BIC = chain.CreditorBIC;
+        }
+        else
+        {
+            // CBPR+ Rule: If no BIC, must have Name + Address
+            if (string.IsNullOrEmpty(chain.CreditorName))
+            {
+                throw new InvalidOperationException(
+                    "Creditor must have BIC or Name when BIC is absent");
+            }
+            
+            agent.Name = chain.CreditorName;
+            
+            // Build postal address
+            agent.PstlAdr = new PostalAddressDto
+            {
+                AdrLine1 = chain.CreditorAddressLine1,
+                AdrLine2 = chain.CreditorAddressLine2,
+                Ctry = chain.CreditorCountry
+            };
+        }
+        
+        return agent;
+    }
+    
+    private AccountDto EnrichCreditorAccount(PaymentChainData chain)
+    {
+        var account = new AccountDto();
+        
+        if (!string.IsNullOrEmpty(chain.CreditorAccountIBAN))
+        {
+            account.IBAN = chain.CreditorAccountIBAN;
+        }
+        else if (!string.IsNullOrEmpty(chain.CreditorAccountOther))
+        {
+            account.Othr = new AccountIdentificationDto
+            {
+                Id = chain.CreditorAccountOther
+            };
+        }
+        else
+        {
+            throw new InvalidOperationException(
+                "Creditor account must have IBAN or Other identification");
+        }
+        
+        return account;
+    }
+    
+    private bool HasCreditorAgent(PaymentChainData chain)
+    {
+        return !string.IsNullOrEmpty(chain.CreditorAgentBIC) || 
+               !string.IsNullOrEmpty(chain.CreditorAgentName);
+    }
+    
+    private AgentDto EnrichCreditorAgent(PaymentChainData chain)
+    {
+        var agent = new AgentDto();
+        
+        if (!string.IsNullOrEmpty(chain.CreditorAgentBIC))
+        {
+            agent.BIC = chain.CreditorAgentBIC;
+        }
+        else if (!string.IsNullOrEmpty(chain.CreditorAgentName))
+        {
+            agent.Name = chain.CreditorAgentName;
+            agent.PstlAdr = new PostalAddressDto
+            {
+                AdrLine1 = chain.CreditorAgentAddressLine1,
+                AdrLine2 = chain.CreditorAgentAddressLine2,
+                Ctry = chain.CreditorAgentCountry
+            };
+        }
+        
+        return agent;
+    }
+    
+    private bool HasCreditorAgentAccount(PaymentChainData chain)
+    {
+        return !string.IsNullOrEmpty(chain.CreditorAgentAccountIBAN) || 
+               !string.IsNullOrEmpty(chain.CreditorAgentAccountOther);
+    }
+    
+    private AccountDto EnrichCreditorAgentAccount(PaymentChainData chain)
+    {
+        var account = new AccountDto();
+        
+        if (!string.IsNullOrEmpty(chain.CreditorAgentAccountIBAN))
+        {
+            account.IBAN = chain.CreditorAgentAccountIBAN;
+        }
+        else if (!string.IsNullOrEmpty(chain.CreditorAgentAccountOther))
+        {
+            account.Othr = new AccountIdentificationDto
+            {
+                Id = chain.CreditorAgentAccountOther
+            };
+        }
+        
+        return account;
+    }
+    
+    private bool HasIntermediaryAgent1(PaymentChainData chain)
+    {
+        return !string.IsNullOrEmpty(chain.IntermediaryAgent1BIC) || 
+               !string.IsNullOrEmpty(chain.IntermediaryAgent1Name);
+    }
+    
+    private AgentDto EnrichIntermediaryAgent1(PaymentChainData chain)
+    {
+        var agent = new AgentDto();
+        
+        if (!string.IsNullOrEmpty(chain.IntermediaryAgent1BIC))
+        {
+            agent.BIC = chain.IntermediaryAgent1BIC;
+        }
+        else if (!string.IsNullOrEmpty(chain.IntermediaryAgent1Name))
+        {
+            agent.Name = chain.IntermediaryAgent1Name;
+            agent.PstlAdr = new PostalAddressDto
+            {
+                AdrLine1 = chain.IntermediaryAgent1AddressLine1,
+                AdrLine2 = chain.IntermediaryAgent1AddressLine2,
+                Ctry = chain.IntermediaryAgent1Country
+            };
+        }
+        
+        return agent;
+    }
+    
+    private AccountDto EnrichIntermediaryAgent1Account(PaymentChainData chain)
+    {
+        // This is mandatory if intermediary agent exists (already validated)
+        var account = new AccountDto();
+        
+        if (!string.IsNullOrEmpty(chain.IntermediaryAgent1AccountIBAN))
+        {
+            account.IBAN = chain.IntermediaryAgent1AccountIBAN;
+        }
+        else if (!string.IsNullOrEmpty(chain.IntermediaryAgent1AccountOther))
+        {
+            account.Othr = new AccountIdentificationDto
+            {
+                Id = chain.IntermediaryAgent1AccountOther
+            };
+        }
+        else
+        {
+            throw new InvalidOperationException(
+                "IntermediaryAgent1Account is mandatory when IntermediaryAgent1 is present");
+        }
+        
+        return account;
+    }
+    
+    private bool HasPaymentTypeInfo(PaymentCoreData payment)
+    {
+        return !string.IsNullOrEmpty(payment.Priority) || 
+               !string.IsNullOrEmpty(payment.ServiceLevel) ||
+               !string.IsNullOrEmpty(payment.CategoryPurpose);
+    }
+    
+    private PaymentTypeInformationDto EnrichPaymentTypeInfo(PaymentCoreData payment)
+    {
+        return new PaymentTypeInformationDto
+        {
+            InstrPrty = payment.Priority,
+            SvcLvl = !string.IsNullOrEmpty(payment.ServiceLevel) 
+                ? new ServiceLevelDto { Cd = payment.ServiceLevel } 
+                : null,
+            CtgyPurp = !string.IsNullOrEmpty(payment.CategoryPurpose)
+                ? new CategoryPurposeDto { Cd = payment.CategoryPurpose }
+                : null
+        };
+    }
+}

@@ -1,0 +1,18 @@
+json{
+  "payment": {
+    "currency": "GBP",
+    "amount": 1000000.00,
+    "valueDate": "2025-10-17",
+    "messageIdentifier": "MSG20251016001",
+    "endToEndId": "E2E20251016001",
+    "uetr": "550e8400-e29b-41d4-a716-446655440000",
+    "instructionForCreditorAgent": "Please credit same day",
+    "instructionForNextAgent": "/ACC/GB29NWBK60161331926819",
+    "remittanceInformation": "Payment for invoice INV-2025-001",
+    "categoryPurpose": "CASH",
+    "purpose": "INTC",
+    "priority": "HIGH",
+    "serviceLevel": "URGP",
+    "paymentChainId": 12345
+  }
+}

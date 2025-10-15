@@ -1,0 +1,36 @@
+csharpnamespace SwiftMessageProcessor.Core.Models;
+
+/// <summary>
+/// Payload data for pacs.009 messages
+/// Deserialized from ISwiftMessageRequest.PayloadJson
+/// Contains pacs.009-specific fields + common payment data
+/// </summary>
+public class Pacs009PayloadData
+{
+    /// <summary>
+    /// Core payment data shared across pacs messages
+    /// Mandatory
+    /// </summary>
+    public PaymentCoreData Payment { get; set; } = new();
+    
+    // ========== pacs.009 Specific Fields ==========
+    // Currently empty - pacs.009 uses only core payment data
+    // Future pacs.009-specific fields would go here
+    
+    /// <summary>
+    /// Validates the pacs.009 payload
+    /// </summary>
+    public ValidationResult Validate()
+    {
+        if (Payment == null)
+            return ValidationResult.Fail("Payment core data is mandatory");
+        
+        var coreValidation = Payment.Validate();
+        if (!coreValidation.IsSuccess)
+            return coreValidation;
+        
+        // Add any pacs.009-specific validation here
+        
+        return ValidationResult.Success();
+    }
+}

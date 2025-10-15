@@ -1,0 +1,133 @@
+namespace SwiftMessageProcessor.Core.Services.Enrichers;
+
+/// <summary>
+/// Enriches group headers for pacs messages
+/// Shared across pacs.008, pacs.009, and other pacs message types
+/// </summary>
+public interface IGroupHeaderEnricher
+{
+    /// <summary>
+    /// Enriches a GroupHeaderDto for pacs messages
+    /// </summary>
+    /// <param name="header">The header to enrich</param>
+    /// <param name="request">The SWIFT message request</param>
+    /// <param name="messageId">Message identifier from payload</param>
+    /// <param name="settlementDate">Settlement date from payload</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    Task EnrichAsync(
+        GroupHeaderDto header,
+        ISwiftMessageRequest request,
+        string messageId,
+        DateTime settlementDate,
+        CancellationToken cancellationToken = default);
+}
+
+public class GroupHeaderEnricher : IGroupHeaderEnricher
+{
+    private readonly IDataAccess _dataAccess;
+    private readonly ILogger<GroupHeaderEnricher> _logger;
+    
+    public GroupHeaderEnricher(
+        IDataAccess dataAccess,
+        ILogger<GroupHeaderEnricher> logger)
+    {
+        _dataAccess = dataAccess;
+        _logger = logger;
+    }
+    
+    public async Task EnrichAsync(
+        GroupHeaderDto header,
+        ISwiftMessageRequest request,
+        string messageId,
+        DateTime settlementDate,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogDebug(
+            "Enriching Group Header for Request {RequestId}, MessageId {MessageId}", 
+            request.RequestId, 
+            messageId);
+        
+        // Message Identification
+        header.MsgId = messageId;
+        
+        // Creation Date Time (always UTC)
+        header.CreDtTm = DateTime.UtcNow;
+        
+        // Number of Transactions (always 1 for CBPR+)
+        header.NbOfTxs = "1";
+        
+        // Settlement Information
+        header.IntrBkSttlmDt = settlementDate;
+        
+        // Instructing Agent (your institution)
+        header.InstgAgt = await GetInstructingAgentAsync(request, cancellationToken);
+        
+        // Instructed Agent (nostro bank)
+        header.InstdAgt = await GetInstructedAgentAsync(request, cancellationToken);
+        
+        _logger.LogDebug(
+            "Group Header enriched: MsgId={MessageId}, SttlmDt={SettlementDate}", 
+            header.MsgId, 
+            header.IntrBkSttlmDt);
+    }
+    
+    private async Task<AgentDto> GetInstructingAgentAsync(
+        ISwiftMessageRequest request,
+        CancellationToken cancellationToken)
+    {
+        // Check if request has BIC directly
+        if (!string.IsNullOrEmpty(request.SenderBic))
+        {
+            return new AgentDto { BIC = request.SenderBic };
+        }
+        
+        // Otherwise lookup from database
+        var parameters = new SqlParameter[]
+        {
+            new SqlParameter("@RequestId", request.RequestId)
+        };
+        
+        var bic = await _dataAccess.ExecuteScalarAsync<string>(
+            "usp_GetInstructingAgentBic",
+            parameters,
+            cancellationToken);
+        
+        if (string.IsNullOrEmpty(bic))
+        {
+            throw new InvalidOperationException(
+                $"Could not determine instructing agent BIC for request {request.RequestId}");
+        }
+        
+        return new AgentDto { BIC = bic };
+    }
+    
+    private async Task<AgentDto> GetInstructedAgentAsync(
+        ISwiftMessageRequest request,
+        CancellationToken cancellationToken)
+    {
+        // Check if request has receiver BIC
+        if (!string.IsNullOrEmpty(request.ReceiverBic))
+        {
+            return new AgentDto { BIC = request.ReceiverBic };
+        }
+        
+        // Otherwise lookup from database
+        var parameters = new SqlParameter[]
+        {
+            new SqlParameter("@RequestId", request.RequestId)
+        };
+        
+        var bic = await _dataAccess.ExecuteScalarAsync<string>(
+            "usp_GetInstructedAgentBic",
+            parameters,
+            cancellationToken);
+        
+        if (string.IsNullOrEmpty(bic))
+        {
+            throw new InvalidOperationException(
+                $"Could not determine instructed agent BIC for request {request.RequestId}");
+        }
+        
+        return new AgentDto { BIC = bic };
+    }
+}
