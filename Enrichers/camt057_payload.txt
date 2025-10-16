@@ -1,0 +1,171 @@
+/// <summary>
+/// Payload data for camt.057 messages (Notification To Receive)
+/// Deserialized from ISwiftMessageRequest.PayloadJson
+/// Used to pre-notify account servicer (nostro bank) of expected incoming funds
+/// INDEPENDENT from pacs payment structures
+/// </summary>
+public class Camt057PayloadData
+{
+    // ========== Financial Information ==========
+    
+    /// <summary>
+    /// Currency code (ISO 4217 3-letter code)
+    /// Example: "GBP", "USD", "EUR"
+    /// Mandatory
+    /// </summary>
+    public string Currency { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Expected amount to be received
+    /// Mandatory
+    /// </summary>
+    public decimal Amount { get; set; }
+    
+    /// <summary>
+    /// Expected value date when funds should arrive
+    /// Mandatory
+    /// </summary>
+    public DateTime ExpectedValueDate { get; set; }
+    
+    // ========== Identification Fields ==========
+    
+    /// <summary>
+    /// Message Identification - for GroupHeader.MsgId
+    /// Unique identifier for this camt.057 message
+    /// Mandatory - Max 35 characters
+    /// </summary>
+    public string MessageIdentification { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Business Message Identifier - for Notification.Id
+    /// Unique identifier for this notification
+    /// Mandatory - Max 35 characters
+    /// </summary>
+    public string BusinessMessageIdentifier { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Instruction Identification - for Item.Id
+    /// Unique identifier for the instruction within the notification
+    /// Mandatory - Max 35 characters
+    /// </summary>
+    public string InstructionIdentification { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// End-to-End Identification
+    /// Unique reference from originator to beneficiary
+    /// Optional - Max 35 characters
+    /// </summary>
+    public string? EndToEndId { get; set; }
+    
+    // ========== Instructions (Free Text) ==========
+    
+    /// <summary>
+    /// Instruction for Creditor Agent
+    /// Free text instructions for your account servicer
+    /// Optional - Max 140 characters
+    /// </summary>
+    public string? InstructionForCreditorAgent { get; set; }
+    
+    /// <summary>
+    /// Instruction for Next Agent
+    /// Free text instructions for agents in the chain
+    /// Optional - Max 140 characters
+    /// </summary>
+    public string? InstructionForNextAgent { get; set; }
+    
+    /// <summary>
+    /// Remittance Information (unstructured)
+    /// Free text payment description/reference
+    /// Optional - Max 140 characters
+    /// </summary>
+    public string? RemittanceInformation { get; set; }
+    
+    // ========== Purpose ==========
+    
+    /// <summary>
+    /// Category Purpose - high-level categorization
+    /// Example: "CASH" (Cash Management), "TREA" (Treasury)
+    /// Optional - Uses ISO Purpose Code external code set
+    /// </summary>
+    public string? CategoryPurpose { get; set; }
+    
+    /// <summary>
+    /// Purpose - specific purpose of the expected payment
+    /// Example: "LOAN" (Loan), "INTC" (Intra-Company)
+    /// Optional - Uses ISO Purpose Code external code set
+    /// </summary>
+    public string? Purpose { get; set; }
+    
+    // ========== Routing ==========
+    
+    /// <summary>
+    /// Payment Chain ID - reference to camt.057 payment chain in database
+    /// Used to retrieve AccountServicer, Debtor, DebtorAgent, IntermediaryAgent
+    /// Mandatory
+    /// </summary>
+    public int PaymentChainId { get; set; }
+    
+    // ========== Validation ==========
+    
+    /// <summary>
+    /// Validates the camt.057 payload
+    /// </summary>
+    public ValidationResult Validate()
+    {
+        // Currency validation
+        if (string.IsNullOrEmpty(Currency))
+            return ValidationResult.Fail("Currency is mandatory");
+        
+        if (Currency.Length != 3)
+            return ValidationResult.Fail("Currency must be a 3-letter ISO 4217 code");
+        
+        // Amount validation
+        if (Amount <= 0)
+            return ValidationResult.Fail("Amount must be greater than zero");
+        
+        // Date validation
+        if (ExpectedValueDate == default(DateTime))
+            return ValidationResult.Fail("ExpectedValueDate is mandatory");
+        
+        // Identifier validations
+        if (string.IsNullOrEmpty(MessageIdentification))
+            return ValidationResult.Fail("MessageIdentification is mandatory");
+        
+        if (MessageIdentification.Length > 35)
+            return ValidationResult.Fail("MessageIdentification exceeds 35 character limit");
+        
+        if (string.IsNullOrEmpty(BusinessMessageIdentifier))
+            return ValidationResult.Fail("BusinessMessageIdentifier is mandatory");
+        
+        if (BusinessMessageIdentifier.Length > 35)
+            return ValidationResult.Fail("BusinessMessageIdentifier exceeds 35 character limit");
+        
+        if (string.IsNullOrEmpty(InstructionIdentification))
+            return ValidationResult.Fail("InstructionIdentification is mandatory");
+        
+        if (InstructionIdentification.Length > 35)
+            return ValidationResult.Fail("InstructionIdentification exceeds 35 character limit");
+        
+        if (!string.IsNullOrEmpty(EndToEndId) && EndToEndId.Length > 35)
+            return ValidationResult.Fail("EndToEndId exceeds 35 character limit");
+        
+        // Optional field length validations
+        if (!string.IsNullOrEmpty(InstructionForCreditorAgent) && 
+            InstructionForCreditorAgent.Length > 140)
+            return ValidationResult.Fail("InstructionForCreditorAgent exceeds 140 character limit");
+        
+        if (!string.IsNullOrEmpty(InstructionForNextAgent) && 
+            InstructionForNextAgent.Length > 140)
+            return ValidationResult.Fail("InstructionForNextAgent exceeds 140 character limit");
+        
+        if (!string.IsNullOrEmpty(RemittanceInformation) && 
+            RemittanceInformation.Length > 140)
+            return ValidationResult.Fail("RemittanceInformation exceeds 140 character limit");
+        
+        // Payment Chain validation
+        if (PaymentChainId <= 0)
+            return ValidationResult.Fail("PaymentChainId must be a positive integer");
+        
+        return ValidationResult.Success();
+    }
+}t

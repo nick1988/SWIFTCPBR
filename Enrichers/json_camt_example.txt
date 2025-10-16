@@ -1,0 +1,15 @@
+{
+  "currency": "GBP",
+  "amount": 500000.00,
+  "expectedValueDate": "2025-10-17",
+  "messageIdentification": "MSG20251016001",
+  "businessMessageIdentifier": "NOTIF20251016001",
+  "instructionIdentification": "INSTR20251016001",
+  "endToEndId": "E2E20251016001",
+  "instructionForCreditorAgent": "Please credit same day",
+  "instructionForNextAgent": "/ACC/GB29NWBK60161331926819",
+  "remittanceInformation": "Expected payment for invoice INV-2025-001",
+  "categoryPurpose": "CASH",
+  "purpose": "INTC",
+  "paymentChainId": 67890
+}t
