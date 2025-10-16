@@ -1,0 +1,32 @@
+namespace SwiftMessageProcessor.Core.Services.Builders;
+
+public interface IPacs009Builder : ISwiftMessageBuilder<Pacs009Dto>
+{
+}
+
+public class Pacs009Builder : SwiftMessageBuilderBase<Pacs009Dto>, IPacs009Builder
+{
+    public Pacs009Builder(
+        string standardsRelease,
+        IDataAccess dataAccess,
+        ILogger<Pacs009Builder> logger)
+        : base("pacs.009.001.08", standardsRelease, dataAccess, logger)
+    {
+    }
+    
+    /// <summary>
+    /// Override to add pacs.009-specific data to template context if needed
+    /// </summary>
+    protected override ScriptObject BuildTemplateContext(
+        Pacs009Dto model,
+        BusinessApplicationHeader bah,
+        RequestHeader requestHeader)
+    {
+        var scriptObject = base.BuildTemplateContext(model, bah, requestHeader);
+        
+        // Add any pacs.009-specific helper functions or data here
+        // For now, base implementation is sufficient
+        
+        return scriptObject;
+    }
+}

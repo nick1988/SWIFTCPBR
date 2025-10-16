@@ -1,0 +1,179 @@
+/// <summary>
+/// Base implementation for SWIFT message builders
+/// Handles common template loading and rendering logic
+/// </summary>
+public abstract class SwiftMessageBuilderBase<TModel> : ISwiftMessageBuilder<TModel>
+    where TModel : class
+{
+    private readonly IDataAccess _dataAccess;
+    private readonly ILogger _logger;
+    
+    public string MessageType { get; }
+    public string StandardsRelease { get; }
+    
+    protected SwiftMessageBuilderBase(
+        string messageType,
+        string standardsRelease,
+        IDataAccess dataAccess,
+        ILogger logger)
+    {
+        MessageType = messageType;
+        StandardsRelease = standardsRelease;
+        _dataAccess = dataAccess;
+        _logger = logger;
+    }
+    
+    public async Task<string> BuildMessageAsync(
+        TModel model,
+        BusinessApplicationHeader bah,
+        RequestHeader requestHeader,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogDebug(
+            "Building {MessageType} message for StandardsRelease {StandardsRelease}",
+            MessageType,
+            StandardsRelease);
+        
+        try
+        {
+            // 1. Load template from database
+            var templateContent = await LoadTemplateAsync(cancellationToken);
+            
+            // 2. Create Scriban template
+            var template = Template.Parse(templateContent);
+            
+            if (template.HasErrors)
+            {
+                var errors = string.Join(", ", template.Messages.Select(m => m.Message));
+                throw new InvalidOperationException(
+                    $"Template parsing failed for {MessageType}: {errors}");
+            }
+            
+            // 3. Build template context with all data
+            var scriptObject = BuildTemplateContext(model, bah, requestHeader);
+            var context = new TemplateContext();
+            context.PushGlobal(scriptObject);
+            
+            // 4. Render template
+            var xml = await template.RenderAsync(context);
+            
+            // 5. Validate XML structure (basic check)
+            ValidateXmlStructure(xml);
+            
+            _logger.LogInformation(
+                "Successfully built {MessageType} message, XML length: {Length} characters",
+                MessageType,
+                xml.Length);
+            
+            return xml;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to build {MessageType} message for StandardsRelease {StandardsRelease}",
+                MessageType,
+                StandardsRelease);
+            throw;
+        }
+    }
+    
+    /// <summary>
+    /// Loads the Scriban template from database
+    /// </summary>
+    private async Task<string> LoadTemplateAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogDebug(
+            "Loading template for {MessageType}, StandardsRelease {StandardsRelease}",
+            MessageType,
+            StandardsRelease);
+        
+        var parameters = new SqlParameter[]
+        {
+            new SqlParameter("@MessageType", MessageType),
+            new SqlParameter("@StandardsRelease", StandardsRelease)
+        };
+        
+        var templateContent = await _dataAccess.ExecuteScalarAsync<string>(
+            "usp_GetMessageTemplate",
+            parameters,
+            cancellationToken);
+        
+        if (string.IsNullOrEmpty(templateContent))
+        {
+            throw new InvalidOperationException(
+                $"Template not found for MessageType '{MessageType}', StandardsRelease '{StandardsRelease}'");
+        }
+        
+        return templateContent;
+    }
+    
+    /// <summary>
+    /// Builds the Scriban template context with all data
+    /// Override in derived classes to add message-specific data
+    /// </summary>
+    protected virtual ScriptObject BuildTemplateContext(
+        TModel model,
+        BusinessApplicationHeader bah,
+        RequestHeader requestHeader)
+    {
+        var scriptObject = new ScriptObject();
+        
+        // Add model data
+        scriptObject.Add("model", model);
+        
+        // Add headers
+        scriptObject.Add("bah", bah);
+        scriptObject.Add("requestHeader", requestHeader);
+        
+        // Add helper functions
+        AddHelperFunctions(scriptObject);
+        
+        return scriptObject;
+    }
+    
+    /// <summary>
+    /// Adds helper functions available in Scriban templates
+    /// </summary>
+    protected virtual void AddHelperFunctions(ScriptObject scriptObject)
+    {
+        // Current UTC timestamp for message generation
+        scriptObject.Add("utc_now", DateTime.UtcNow);
+        
+        // Format date for SWIFT (ISO 8601)
+        scriptObject.Import("format_date", new Func<DateTime, string>(date =>
+            date.ToString("yyyy-MM-dd")));
+        
+        // Format datetime for SWIFT (ISO 8601 with timezone)
+        scriptObject.Import("format_datetime", new Func<DateTime, string>(dateTime =>
+            dateTime.ToString("yyyy-MM-ddTHH:mm:ssZ")));
+        
+        // Format amount (2 decimal places, no thousands separator)
+        scriptObject.Import("format_amount", new Func<decimal, string>(amount =>
+            amount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)));
+    }
+    
+    /// <summary>
+    /// Basic XML validation to ensure template rendered correctly
+    /// </summary>
+    private void ValidateXmlStructure(string xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml))
+            throw new InvalidOperationException("Template rendered empty XML");
+        
+        // Basic check: Must start with XML declaration or root element
+        xml = xml.Trim();
+        if (!xml.StartsWith("<?xml") && !xml.StartsWith("<"))
+            throw new InvalidOperationException("Generated content is not valid XML");
+        
+        // Try to load as XML document (throws if invalid)
+        try
+        {
+            var xmlDoc = new System.Xml.XmlDocument();
+            xmlDoc.LoadXml(xml);
+        }
+        catch (System.Xml.XmlException ex)
+        {
+            throw new InvalidOperationException($"Generated XML is malformed: {ex.Message}", ex);
+        }
+    }
+}

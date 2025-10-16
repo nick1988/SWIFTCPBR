@@ -1,0 +1,29 @@
+/// <summary>
+/// Builds SWIFT messages by rendering Scriban templates with populated DTOs
+/// </summary>
+public interface ISwiftMessageBuilder<TModel> where TModel : class
+{
+    /// <summary>
+    /// Message type this builder handles (e.g., "pacs.009.001.08")
+    /// </summary>
+    string MessageType { get; }
+    
+    /// <summary>
+    /// Standards release this builder supports (e.g., "2024", "2025")
+    /// </summary>
+    string StandardsRelease { get; }
+    
+    /// <summary>
+    /// Builds a SWIFT message by rendering the Scriban template
+    /// </summary>
+    /// <param name="model">Enriched DTO containing message data</param>
+    /// <param name="bah">Business Application Header</param>
+    /// <param name="requestHeader">SwiftNet Request Header</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>SWIFT XML message as string</returns>
+    Task<string> BuildMessageAsync(
+        TModel model,
+        BusinessApplicationHeader bah,
+        RequestHeader requestHeader,
+        CancellationToken cancellationToken = default);
+}
