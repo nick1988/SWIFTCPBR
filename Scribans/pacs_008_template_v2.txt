@@ -1,0 +1,88 @@
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <FIToFICstmrCdtTrf>
+    <GrpHdr>
+      {{~ include 'partials/group-header-pacs' model.GroupHeader ~}}
+    </GrpHdr>
+    <CdtTrfTxInf>
+      {{~ include 'partials/payment-identification' model.PaymentId ~}}
+      {{~ include 'partials/payment-type-information' model.PaymentTypeInfo ~}}
+      <IntrBkSttlmAmt Ccy="{{ model.SettlementAmount.Ccy }}">{{ model.SettlementAmount.ValueFormatted }}</IntrBkSttlmAmt>
+      <IntrBkSttlmDt>{{ model.SettlementDateFormatted }}</IntrBkSttlmDt>
+      <InstdAmt Ccy="{{ model.InstructedAmount.Ccy }}">{{ model.InstructedAmount.ValueFormatted }}</InstdAmt>
+      <ChrgBr>{{ model.ChargeBearer }}</ChrgBr>
+      <InstgAgt>
+        <FinInstnId>
+          {{~ include 'partials/financial-institution-identification' model.InstructingAgent.FinInstnId ~}}
+        </FinInstnId>
+      </InstgAgt>
+      <InstdAgt>
+        <FinInstnId>
+          {{~ include 'partials/financial-institution-identification' model.InstructedAgent.FinInstnId ~}}
+        </FinInstnId>
+      </InstdAgt>
+      {{~ if model.IntermediaryAgent1 ~}}
+      <IntrmyAgt1>
+        <FinInstnId>
+          {{~ include 'partials/financial-institution-identification' model.IntermediaryAgent1.FinInstnId ~}}
+        </FinInstnId>
+      </IntrmyAgt1>
+      {{~ end ~}}
+      {{~ if model.IntermediaryAgent1Account ~}}
+      <IntrmyAgt1Acct>
+        {{~ include 'partials/account-identifier' model.IntermediaryAgent1Account ~}}
+      </IntrmyAgt1Acct>
+      {{~ end ~}}
+      <Dbtr>
+        {{~ include 'partials/party' model.Debtor ~}}
+      </Dbtr>
+      {{~ if model.DebtorAccount ~}}
+      <DbtrAcct>
+        {{~ include 'partials/account-identifier' model.DebtorAccount ~}}
+      </DbtrAcct>
+      {{~ end ~}}
+      <DbtrAgt>
+        <FinInstnId>
+          {{~ include 'partials/financial-institution-identification' model.DebtorAgent.FinInstnId ~}}
+        </FinInstnId>
+      </DbtrAgt>
+      {{~ if model.CreditorAgent ~}}
+      <CdtrAgt>
+        <FinInstnId>
+          {{~ include 'partials/financial-institution-identification' model.CreditorAgent.FinInstnId ~}}
+        </FinInstnId>
+      </CdtrAgt>
+      {{~ end ~}}
+      {{~ if model.CreditorAgentAccount ~}}
+      <CdtrAgtAcct>
+        {{~ include 'partials/account-identifier' model.CreditorAgentAccount ~}}
+      </CdtrAgtAcct>
+      {{~ end ~}}
+      <Cdtr>
+        {{~ include 'partials/party' model.Creditor ~}}
+      </Cdtr>
+      <CdtrAcct>
+        {{~ include 'partials/account-identifier' model.CreditorAccount ~}}
+      </CdtrAcct>
+      {{~ if model.InstrForCdtrAgt ~}}
+      <InstrForCdtrAgt>
+        <InstrInf>{{ model.InstrForCdtrAgt }}</InstrInf>
+      </InstrForCdtrAgt>
+      {{~ end ~}}
+      {{~ if model.InstrForNxtAgt ~}}
+      <InstrForNxtAgt>
+        <InstrInf>{{ model.InstrForNxtAgt }}</InstrInf>
+      </InstrForNxtAgt>
+      {{~ end ~}}
+      {{~ if model.Purpose ~}}
+      <Purp>
+        <Cd>{{ model.Purpose }}</Cd>
+      </Purp>
+      {{~ end ~}}
+      {{~ if model.RemittanceInfo ~}}
+      <RmtInf>
+        <Ustrd>{{ model.RemittanceInfo }}</Ustrd>
+      </RmtInf>
+      {{~ end ~}}
+    </CdtTrfTxInf>
+  </FIToFICstmrCdtTrf>
+</Document>

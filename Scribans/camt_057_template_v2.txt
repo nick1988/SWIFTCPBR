@@ -1,0 +1,67 @@
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.057.001.06" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <NtfctnToRcv>
+    <GrpHdr>
+      {{~ include 'partials/group-header-camt' model.GroupHeader ~}}
+    </GrpHdr>
+    <Ntfctn>
+      <Id>{{ model.NotificationId }}</Id>
+      {{~ if model.Account ~}}
+      <Acct>
+        {{~ include 'partials/account-identifier' model.Account ~}}
+      </Acct>
+      {{~ end ~}}
+      {{~ if model.AccountOwner ~}}
+      <AcctOwnr>
+        <Agt>
+          <FinInstnId>
+            {{~ include 'partials/financial-institution-identification' model.AccountOwner.FinInstnId ~}}
+          </FinInstnId>
+        </Agt>
+      </AcctOwnr>
+      {{~ end ~}}
+      {{~ if model.AccountServicer ~}}
+      <AcctSvcr>
+        <FinInstnId>
+          {{~ include 'partials/financial-institution-identification' model.AccountServicer.FinInstnId ~}}
+        </FinInstnId>
+      </AcctSvcr>
+      {{~ end ~}}
+      <Itm>
+        <Id>{{ model.Item.Id }}</Id>
+        {{~ if model.Item.EndToEndId ~}}
+        <EndToEndId>{{ model.Item.EndToEndId }}</EndToEndId>
+        {{~ end ~}}
+        {{~ if model.Item.UETR ~}}
+        <UETR>{{ model.Item.UETR }}</UETR>
+        {{~ end ~}}
+        <Amt Ccy="{{ model.Item.Amount.Ccy }}">{{ model.Item.Amount.ValueFormatted }}</Amt>
+        <XpctdValDt>{{ model.Item.ExpectedValueDateFormatted }}</XpctdValDt>
+        <Dbtr>
+          {{~ if model.Item.Debtor.Party ~}}
+          {{~ include 'partials/party' model.Item.Debtor.Party ~}}
+          {{~ else if model.Item.Debtor.Agent ~}}
+          <Agt>
+            <FinInstnId>
+              {{~ include 'partials/financial-institution-identification' model.Item.Debtor.Agent.FinInstnId ~}}
+            </FinInstnId>
+          </Agt>
+          {{~ end ~}}
+        </Dbtr>
+        {{~ if model.Item.DebtorAgent ~}}
+        <DbtrAgt>
+          <FinInstnId>
+            {{~ include 'partials/financial-institution-identification' model.Item.DebtorAgent.FinInstnId ~}}
+          </FinInstnId>
+        </DbtrAgt>
+        {{~ end ~}}
+        {{~ if model.Item.IntermediaryAgent ~}}
+        <IntrmyAgt>
+          <FinInstnId>
+            {{~ include 'partials/financial-institution-identification' model.Item.IntermediaryAgent.FinInstnId ~}}
+          </FinInstnId>
+        </IntrmyAgt>
+        {{~ end ~}}
+      </Itm>
+    </Ntfctn>
+  </NtfctnToRcv>
+</Document>
