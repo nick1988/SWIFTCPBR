@@ -1,0 +1,27 @@
+$accounts = @("u1", "u2")
+
+Write-Host "Password Reset - Enter once to change both accounts`n" -ForegroundColor Cyan
+
+# Get the new password once
+$newPassword = Read-Host "Enter new password" -AsSecureString
+$BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($newPassword)
+$plainPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+
+# Change password for each account
+foreach ($account in $accounts) {
+    Write-Host "Changing $account..." -NoNewline
+    
+    $result = echo $plainPassword | net user $account * /domain 2>&1
+    
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host " ✓" -ForegroundColor Green
+    } else {
+        Write-Host " ✗" -ForegroundColor Red
+    }
+}
+
+# Clean up password from memory
+[System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
+Remove-Variable plainPassword
+
+Write-Host "`nDone!" -ForegroundColor Green
