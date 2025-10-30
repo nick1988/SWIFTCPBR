@@ -1,0 +1,303 @@
+Option 1: Lightweight API Audit Table (Recommended)
+
+CREATE TABLE ApiRequestAudit (
+    AuditId BIGINT IDENTITY(1,1) PRIMARY KEY,
+    RequestId UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID(),
+    
+    -- Who & When
+    SourceSystem VARCHAR(100) NOT NULL,
+    ApiKey VARCHAR(100),  -- If you use API keys
+    CalledAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    
+    -- What
+    Endpoint VARCHAR(200) NOT NULL,  -- e.g., "/api/mx/pacs008"
+    HttpMethod VARCHAR(10) NOT NULL,  -- POST
+    
+    -- Request details
+    IdempotencyKey VARCHAR(100),  -- If provided
+    RequestBodyHash VARCHAR(64),  -- SHA256 of request body
+    RequestSize INT,  -- Size in bytes
+    
+    -- Response
+    ResponseStatusCode INT NOT NULL,
+    ResponseTimeMs INT,
+    CompletedAt DATETIME2,
+    
+    -- Link to downstream processing
+    QueueId BIGINT,  -- If request made it to queue
+    MessageId UNIQUEIDENTIFIER,  -- If message was created
+    
+    -- Errors
+    ErrorMessage NVARCHAR(MAX),
+    
+    -- Metadata
+    IpAddress VARCHAR(45),
+    UserAgent VARCHAR(500)
+);
+
+CREATE INDEX IX_ApiRequestAudit_SourceSystem_CalledAt 
+    ON ApiRequestAudit(SourceSystem, CalledAt);
+CREATE INDEX IX_ApiRequestAudit_IdempotencyKey 
+    ON ApiRequestAudit(IdempotencyKey);
+CREATE INDEX IX_ApiRequestAudit_CalledAt 
+    ON ApiRequestAudit(CalledAt);
+
+Why NOT Store Full Request Body?
+You're already storing it in MessageQueue.RawJsonRequest for successful requests. For the API audit:
+
+Store a hash of the request body (tamper detection + deduplication)
+Store size (detect unusually large payloads)
+Only store full body for failed requests (debugging)
+
+This keeps the table lean.
+Implementation: Action Filter
+
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
+public class ApiAuditAttribute : ActionFilterAttribute
+{
+    private const string AuditStopwatchKey = "ApiAudit_Stopwatch";
+    private const string AuditEntryKey = "ApiAudit_Entry";
+
+    public override async Task OnActionExecutionAsync(
+        ActionExecutingContext context,
+        ActionExecutionDelegate next)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        context.HttpContext.Items[AuditStopwatchKey] = stopwatch;
+
+        var auditEntry = new ApiAuditEntry
+        {
+            RequestId = Guid.NewGuid(),
+            SourceSystem = ExtractSourceSystem(context),
+            ApiKey = ExtractApiKey(context),
+            CalledAt = DateTime.UtcNow,
+            Endpoint = context.HttpContext.Request.Path.Value,
+            HttpMethod = context.HttpContext.Request.Method,
+            IpAddress = context.HttpContext.Connection.RemoteIpAddress?.ToString(),
+            UserAgent = context.HttpContext.Request.Headers["User-Agent"].ToString()
+        };
+
+        // Extract idempotency key if present
+        if (context.ActionArguments.TryGetValue("request", out var requestObj))
+        {
+            if (requestObj is SwiftMessageRequest swiftRequest)
+            {
+                auditEntry.IdempotencyKey = swiftRequest.IdempotencyKey;
+                
+                // Hash the request body
+                var requestJson = JsonSerializer.Serialize(swiftRequest);
+                auditEntry.RequestBodyHash = ComputeSha256Hash(requestJson);
+                auditEntry.RequestSize = Encoding.UTF8.GetByteCount(requestJson);
+            }
+        }
+
+        context.HttpContext.Items[AuditEntryKey] = auditEntry;
+
+        var executedContext = await next();
+
+        stopwatch.Stop();
+        auditEntry.ResponseTimeMs = (int)stopwatch.ElapsedMilliseconds;
+        auditEntry.CompletedAt = DateTime.UtcNow;
+        auditEntry.ResponseStatusCode = executedContext.HttpContext.Response.StatusCode;
+
+        // Capture error details
+        if (executedContext.Exception != null)
+        {
+            auditEntry.ErrorMessage = executedContext.Exception.Message;
+        }
+
+        // Link to queue/message if successful
+        if (executedContext.Result is OkObjectResult okResult)
+        {
+            if (okResult.Value is MessageCreationResponse response)
+            {
+                auditEntry.MessageId = response.MessageId;
+                auditEntry.QueueId = response.QueueId;
+            }
+        }
+
+        // Write to database asynchronously (fire and forget)
+        var auditService = context.HttpContext.RequestServices
+            .GetRequiredService<IApiAuditService>();
+        
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await auditService.LogApiRequestAsync(auditEntry);
+            }
+            catch (Exception ex)
+            {
+                // Log failure to write audit (but don't fail the request)
+                var logger = context.HttpContext.RequestServices
+                    .GetRequiredService<ILogger<ApiAuditAttribute>>();
+                logger.LogError(ex, "Failed to write API audit entry");
+            }
+        });
+    }
+
+    private string ExtractSourceSystem(ActionExecutingContext context)
+    {
+        // Your logic to identify source system
+        // Could be from JWT claim, API key, or custom header
+        return context.HttpContext.Request.Headers["X-Source-System"].FirstOrDefault() 
+               ?? "Unknown";
+    }
+
+    private string ExtractApiKey(ActionExecutingContext context)
+    {
+        // Extract API key from header or auth
+        return context.HttpContext.Request.Headers["X-API-Key"].FirstOrDefault();
+    }
+
+    private string ComputeSha256Hash(string input)
+    {
+        using var sha256 = SHA256.Create();
+        var bytes = Encoding.UTF8.GetBytes(input);
+        var hash = sha256.ComputeHash(bytes);
+        return Convert.ToHexString(hash);
+    }
+}
+
+API CONTROLLERS 
+
+[ApiController]
+[Route("api/mx")]
+[ApiAudit]  // Apply to entire controller
+public class MXMessageController : ControllerBase
+{
+    [HttpPost("pacs008")]
+    public async Task<IActionResult> CreatePacs008([FromBody] SwiftMessageRequest request)
+    {
+        // Your existing logic
+    }
+}
+
+[ApiController]
+[Route("api/mt")]
+[ApiAudit]  // Apply to entire controller
+public class MTMessageController : ControllerBase
+{
+    [HttpPost("mt103")]
+    public async Task<IActionResult> CreateMT103([FromBody] SwiftMessageRequest request)
+    {
+        // Your existing logic
+    }
+}
+
+SP
+
+CREATE PROCEDURE [dbo].[usp_InsertApiRequestAudit]
+    @RequestId UNIQUEIDENTIFIER,
+    @SourceSystem VARCHAR(100),
+    @ApiKey VARCHAR(100) = NULL,
+    @CalledAt DATETIME2,
+    @Endpoint VARCHAR(200),
+    @HttpMethod VARCHAR(10),
+    @IdempotencyKey VARCHAR(100) = NULL,
+    @RequestBodyHash VARCHAR(64),
+    @RequestSize INT,
+    @ResponseStatusCode INT,
+    @ResponseTimeMs INT,
+    @CompletedAt DATETIME2,
+    @QueueId BIGINT = NULL,
+    @MessageId UNIQUEIDENTIFIER = NULL,
+    @ErrorMessage NVARCHAR(MAX) = NULL,
+    @IpAddress VARCHAR(45) = NULL,
+    @UserAgent VARCHAR(500) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    
+    INSERT INTO ApiRequestAudit (
+        RequestId, SourceSystem, ApiKey, CalledAt, Endpoint, HttpMethod,
+        IdempotencyKey, RequestBodyHash, RequestSize,
+        ResponseStatusCode, ResponseTimeMs, CompletedAt,
+        QueueId, MessageId, ErrorMessage, IpAddress, UserAgent
+    )
+    VALUES (
+        @RequestId, @SourceSystem, @ApiKey, @CalledAt, @Endpoint, @HttpMethod,
+        @IdempotencyKey, @RequestBodyHash, @RequestSize,
+        @ResponseStatusCode, @ResponseTimeMs, @CompletedAt,
+        @QueueId, @MessageId, @ErrorMessage, @IpAddress, @UserAgent
+    );
+END
+
+DAL
+
+public interface IApiAuditService
+{
+    Task LogApiRequestAsync(ApiAuditEntry entry);
+}
+
+public class ApiAuditService : IApiAuditService
+{
+    private readonly IDbConnection _connection;
+
+    public ApiAuditService(IDbConnection connection)
+    {
+        _connection = connection;
+    }
+
+    public async Task LogApiRequestAsync(ApiAuditEntry entry)
+    {
+        var parameters = new DynamicParameters();
+        parameters.Add("@RequestId", entry.RequestId);
+        parameters.Add("@SourceSystem", entry.SourceSystem);
+        parameters.Add("@ApiKey", entry.ApiKey);
+        parameters.Add("@CalledAt", entry.CalledAt);
+        parameters.Add("@Endpoint", entry.Endpoint);
+        parameters.Add("@HttpMethod", entry.HttpMethod);
+        parameters.Add("@IdempotencyKey", entry.IdempotencyKey);
+        parameters.Add("@RequestBodyHash", entry.RequestBodyHash);
+        parameters.Add("@RequestSize", entry.RequestSize);
+        parameters.Add("@ResponseStatusCode", entry.ResponseStatusCode);
+        parameters.Add("@ResponseTimeMs", entry.ResponseTimeMs);
+        parameters.Add("@CompletedAt", entry.CompletedAt);
+        parameters.Add("@QueueId", entry.QueueId);
+        parameters.Add("@MessageId", entry.MessageId);
+        parameters.Add("@ErrorMessage", entry.ErrorMessage);
+        parameters.Add("@IpAddress", entry.IpAddress);
+        parameters.Add("@UserAgent", entry.UserAgent);
+
+        await _connection.ExecuteAsync(
+            "usp_InsertApiRequestAudit",
+            parameters,
+            commandType: CommandType.StoredProcedure);
+    }
+}
+
+queries 
+
+-- Who called the API today?
+SELECT SourceSystem, COUNT(*) as CallCount
+FROM ApiRequestAudit
+WHERE CalledAt >= CAST(GETUTCDATE() AS DATE)
+GROUP BY SourceSystem;
+
+-- Failed API calls in last 24 hours
+SELECT *
+FROM ApiRequestAudit
+WHERE CalledAt >= DATEADD(HOUR, -24, GETUTCDATE())
+  AND ResponseStatusCode >= 400
+ORDER BY CalledAt DESC;
+
+-- Suspicious activity (same source calling rapidly)
+SELECT SourceSystem, COUNT(*) as CallsInMinute
+FROM ApiRequestAudit
+WHERE CalledAt >= DATEADD(MINUTE, -1, GETUTCDATE())
+GROUP BY SourceSystem
+HAVING COUNT(*) > 10;
+
+-- Trace a specific message through the system
+SELECT 
+    a.CalledAt as ApiCalledAt,
+    a.SourceSystem,
+    a.ResponseStatusCode,
+    q.CreatedAt as QueuedAt,
+    p.CreatedAt as ProcessedAt,
+    p.Status as CurrentStatus
+FROM ApiRequestAudit a
+LEFT JOIN MessageQueue q ON a.QueueId = q.QueueId
+LEFT JOIN ProcessedMessages p ON a.MessageId = p.MessageId
+WHERE a.IdempotencyKey = 'ABC123';
