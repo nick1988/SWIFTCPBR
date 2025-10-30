@@ -1,0 +1,228 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using ClosedXML.Excel;
+
+// PACS Message (Payments) - First JSON format
+public class PacsRequest
+{
+    [JsonPropertyName("entity")]
+    public string Entity { get; set; }
+    
+    [JsonPropertyName("requestSource")]
+    public string RequestSource { get; set; }
+    
+    [JsonPropertyName("standards")]
+    public string Standards { get; set; }  // Will be null
+    
+    [JsonPropertyName("paymentChainId")]
+    public int PaymentChainId { get; set; }
+    
+    [JsonPropertyName("currency")]
+    public string Currency { get; set; }
+    
+    [JsonPropertyName("amount")]
+    public decimal Amount { get; set; }
+    
+    [JsonPropertyName("expectedValueDate")]
+    public string ExpectedValueDate { get; set; }
+    
+    [JsonPropertyName("messageIdentifier")]
+    public string MessageIdentifier { get; set; }
+    
+    [JsonPropertyName("endToEndId")]
+    public string EndToEndId { get; set; }
+    
+    [JsonPropertyName("uetr")]
+    public string Uetr { get; set; }
+    
+    [JsonPropertyName("convertedEntity")]
+    public int ConvertedEntity { get; set; }
+}
+
+// CAMT Message (Receipts) - Second JSON format
+public class CamtRequest
+{
+    [JsonPropertyName("entity")]
+    public string Entity { get; set; }
+    
+    [JsonPropertyName("requestSource")]
+    public string RequestSource { get; set; }
+    
+    [JsonPropertyName("standards")]
+    public string Standards { get; set; }  // Will be null
+    
+    [JsonPropertyName("paymentChainId")]
+    public int PaymentChainId { get; set; }
+    
+    [JsonPropertyName("currency")]
+    public string Currency { get; set; }
+    
+    [JsonPropertyName("amount")]
+    public decimal Amount { get; set; }
+    
+    [JsonPropertyName("valueDate")]
+    public string ValueDate { get; set; }
+    
+    [JsonPropertyName("messageIdentifier")]
+    public string MessageIdentifier { get; set; }
+    
+    [JsonPropertyName("endToEndId")]
+    public string EndToEndId { get; set; }
+    
+    [JsonPropertyName("instructionForCreditorAgent")]
+    public string InstructionForCreditorAgent { get; set; }
+    
+    [JsonPropertyName("instructionForNextAgent")]
+    public string InstructionForNextAgent { get; set; }
+    
+    [JsonPropertyName("remittanceInformation")]
+    public string RemittanceInformation { get; set; }
+    
+    [JsonPropertyName("categoryPurpose")]
+    public string CategoryPurpose { get; set; }
+    
+    [JsonPropertyName("purpose")]
+    public string Purpose { get; set; }
+}
+
+public class ExcelToSwiftConverter
+{
+    // Set your synthetic request source here
+    private const string REQUEST_SOURCE = "TestDataGenerator";  // Change this to your preferred name
+    
+    public static void ConvertExcelToJson(string excelFilePath, string outputFolder)
+    {
+        var pacsRequests = new List<PacsRequest>();
+        var camtRequests = new List<CamtRequest>();
+
+        using (var workbook = new XLWorkbook(excelFilePath))
+        {
+            var worksheet = workbook.Worksheet(1);
+            var rows = worksheet.RowsUsed().Skip(1); // Skip header
+
+            foreach (var row in rows)
+            {
+                string messageType = row.Cell(5).GetString().ToUpper(); // Column E
+                
+                if (string.IsNullOrWhiteSpace(messageType))
+                    continue;
+
+                if (messageType.Contains("PACS"))
+                {
+                    var pacsRequest = new PacsRequest
+                    {
+                        Entity = row.Cell(4).GetString(), // Column D
+                        RequestSource = REQUEST_SOURCE,
+                        Standards = null, // Let API determine standards
+                        PaymentChainId = row.Cell(9).TryGetValue(out int chainId) ? chainId : 0, // Column I
+                        Currency = row.Cell(6).GetString(), // Column F
+                        Amount = row.Cell(7).TryGetValue(out decimal amt) ? amt : 0, // Column G
+                        ExpectedValueDate = FormatDate(row.Cell(8)), // Column H
+                        MessageIdentifier = row.Cell(10).GetString(), // Column J
+                        EndToEndId = row.Cell(11).GetString(), // Column K
+                        Uetr = "", // Map to appropriate column if available
+                        ConvertedEntity = 0 // Map to appropriate column if available
+                    };
+                    
+                    if (!string.IsNullOrWhiteSpace(pacsRequest.Entity))
+                    {
+                        pacsRequests.Add(pacsRequest);
+                    }
+                }
+                else if (messageType.Contains("CAMT"))
+                {
+                    var camtRequest = new CamtRequest
+                    {
+                        Entity = row.Cell(4).GetString(), // Column D
+                        RequestSource = REQUEST_SOURCE,
+                        Standards = null, // Let API determine standards
+                        PaymentChainId = row.Cell(9).TryGetValue(out int chainId) ? chainId : 0, // Column I
+                        Currency = row.Cell(6).GetString(), // Column F
+                        Amount = row.Cell(7).TryGetValue(out decimal amt) ? amt : 0, // Column G
+                        ValueDate = FormatDate(row.Cell(8)), // Column H
+                        MessageIdentifier = row.Cell(10).GetString(), // Column J
+                        EndToEndId = row.Cell(11).GetString(), // Column K
+                        InstructionForCreditorAgent = row.Cell(12).GetString(), // Column L
+                        InstructionForNextAgent = row.Cell(13).GetString(), // Column M
+                        RemittanceInformation = row.Cell(14).GetString(), // Column N
+                        CategoryPurpose = row.Cell(15).GetString(), // Column O
+                        Purpose = row.Cell(16).GetString() // Column P
+                    };
+                    
+                    if (!string.IsNullOrWhiteSpace(camtRequest.Entity))
+                    {
+                        camtRequests.Add(camtRequest);
+                    }
+                }
+            }
+        }
+
+        // Save to separate files
+        var options = new JsonSerializerOptions 
+        { 
+            WriteIndented = true,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull  // This will exclude null values from JSON
+        };
+
+        if (pacsRequests.Any())
+        {
+            string pacsJson = JsonSerializer.Serialize(pacsRequests, options);
+            string pacsPath = Path.Combine(outputFolder, "pacs_requests.json");
+            File.WriteAllText(pacsPath, pacsJson);
+            Console.WriteLine($"✓ Created {pacsRequests.Count} PACS requests: {pacsPath}");
+        }
+
+        if (camtRequests.Any())
+        {
+            string camtJson = JsonSerializer.Serialize(camtRequests, options);
+            string camtPath = Path.Combine(outputFolder, "camt_requests.json");
+            File.WriteAllText(camtPath, camtJson);
+            Console.WriteLine($"✓ Created {camtRequests.Count} CAMT requests: {camtPath}");
+        }
+    }
+
+    private static string FormatDate(IXLCell cell)
+    {
+        try
+        {
+            if (cell.TryGetValue(out DateTime date))
+            {
+                return date.ToString("yyyy-MM-dd");
+            }
+            return cell.GetString();
+        }
+        catch
+        {
+            return cell.GetString();
+        }
+    }
+
+    static void Main(string[] args)
+    {
+        try
+        {
+            string excelPath = @"C:\path\to\your\London UAT Test Script.xlsx";
+            string outputFolder = @"C:\path\to\output";
+
+            // Create output folder if it doesn't exist
+            Directory.CreateDirectory(outputFolder);
+
+            ConvertExcelToJson(excelPath, outputFolder);
+            
+            Console.WriteLine("\n✓ Conversion completed successfully!");
+            Console.WriteLine("Press any key to exit...");
+            Console.ReadKey();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Error: {ex.Message}");
+            Console.WriteLine(ex.StackTrace);
+            Console.WriteLine("\nPress any key to exit...");
+            Console.ReadKey();
+        }
+    }
+}
