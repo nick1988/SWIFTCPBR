@@ -1,0 +1,154 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+
+public class MultiEndpointTestRunner
+{
+    private readonly HttpClient _httpClient;
+    private readonly string _apiKey;
+    private readonly Dictionary<string, string> _endpointMapping;
+    
+    public MultiEndpointTestRunner(string baseUrl, string apiKey)
+    {
+        _httpClient = new HttpClient { BaseAddress = new Uri(baseUrl) };
+        _apiKey = apiKey;
+        
+        // Map file prefixes/patterns to endpoints
+        _endpointMapping = new Dictionary<string, string>
+        {
+            { "payment", "/api/payments" },
+            { "customer", "/api/customers" },
+            { "order", "/api/orders" }
+        };
+    }
+    
+    public async Task RunTestsAsync(string folderPath)
+    {
+        var jsonFiles = Directory.GetFiles(folderPath, "*.json");
+        
+        int totalSubmissions = 0;
+        int successCount = 0;
+        int failCount = 0;
+        
+        foreach (string filePath in jsonFiles)
+        {
+            string fileName = Path.GetFileName(filePath).ToLower();
+            
+            try
+            {
+                Console.WriteLine($"\n{'=',-60}");
+                Console.WriteLine($"Processing file: {fileName}");
+                Console.WriteLine($"{'=',-60}");
+                
+                // Read JSON content
+                string jsonContent = await File.ReadAllTextAsync(filePath);
+                
+                // Determine endpoint based on filename
+                string endpoint = GetEndpointFromFileName(fileName);
+                
+                if (endpoint == null)
+                {
+                    Console.WriteLine($"✗ SKIPPED - No endpoint mapping found for {fileName}");
+                    continue;
+                }
+                
+                // Parse JSON array
+                var submissions = JsonSerializer.Deserialize<List<JsonElement>>(jsonContent);
+                
+                if (submissions == null || submissions.Count == 0)
+                {
+                    Console.WriteLine($"✗ No submissions found in {fileName}");
+                    continue;
+                }
+                
+                Console.WriteLine($"Found {submissions.Count} submission(s) - Endpoint: {endpoint}\n");
+                
+                // Loop through each submission in the array
+                for (int i = 0; i < submissions.Count; i++)
+                {
+                    totalSubmissions++;
+                    
+                    Console.Write($"  [{i + 1}/{submissions.Count}] Submitting... ");
+                    
+                    try
+                    {
+                        // Serialize individual submission back to JSON
+                        string submissionJson = JsonSerializer.Serialize(submissions[i]);
+                        
+                        // Post to appropriate endpoint
+                        var response = await PostToEndpointAsync(endpoint, submissionJson);
+                        
+                        if (response.IsSuccessStatusCode)
+                        {
+                            string responseBody = await response.Content.ReadAsStringAsync();
+                            Console.WriteLine($"✓ SUCCESS");
+                            Console.WriteLine($"      Response: {responseBody}");
+                            successCount++;
+                        }
+                        else
+                        {
+                            string errorBody = await response.Content.ReadAsStringAsync();
+                            Console.WriteLine($"✗ FAILED - Status: {response.StatusCode}");
+                            Console.WriteLine($"      Error: {errorBody}");
+                            failCount++;
+                        }
+                        
+                        // Optional: Add delay between submissions to avoid rate limiting
+                        await Task.Delay(500);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"✗ ERROR - {ex.Message}");
+                        failCount++;
+                    }
+                }
+            }
+            catch (JsonException ex)
+            {
+                Console.WriteLine($"✗ JSON Parse Error in {fileName}: {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"✗ ERROR processing {fileName}: {ex.Message}");
+            }
+        }
+        
+        // Print summary
+        Console.WriteLine($"\n{'=',-60}");
+        Console.WriteLine($"Test Summary:");
+        Console.WriteLine($"  Total Submissions: {totalSubmissions}");
+        Console.WriteLine($"  Successful: {successCount}");
+        Console.WriteLine($"  Failed: {failCount}");
+        Console.WriteLine($"{'=',-60}\n");
+    }
+    
+    private string GetEndpointFromFileName(string fileName)
+    {
+        // Check which endpoint mapping matches the filename
+        foreach (var mapping in _endpointMapping)
+        {
+            if (fileName.StartsWith(mapping.Key, StringComparison.OrdinalIgnoreCase))
+            {
+                return mapping.Value;
+            }
+        }
+        return null;
+    }
+    
+    private async Task<HttpResponseMessage> PostToEndpointAsync(string endpoint, string jsonContent)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+        {
+            Content = new StringContent(jsonContent, Encoding.UTF8, "application/json")
+        };
+        
+        request.Headers.Add("X-API-Key", _apiKey);
+        request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        
+        return await _httpClient.SendAsync(request);
+    }
+}
