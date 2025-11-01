@@ -1,0 +1,56 @@
+@echo off
+setlocal enabledelayedexpansion
+
+:: === CONFIGURATION ===
+set "SERVER=YourServerName"
+set "DATABASE=YourDatabaseName"
+set "SCRIPT_DIR=%~dp0"  :: Folder containing this .bat and SQL files
+
+:: === TIMESTAMPED LOG FILE ===
+set "LOG_FILE=%SCRIPT_DIR%RunAll_%DATE:~-4%%DATE:~3,2%%DATE:~0,2%_%TIME:~0,2%%TIME:~3,2%.log"
+set "LOG_FILE=%LOG_FILE: =0%"   :: Replace spaces in time with 0
+
+echo ============================================ > "%LOG_FILE%"
+echo Running all SQL files in %SCRIPT_DIR% >> "%LOG_FILE%"
+echo Target DB: %DATABASE% on %SERVER% >> "%LOG_FILE%"
+echo Log File: %LOG_FILE% >> "%LOG_FILE%"
+echo ============================================ >> "%LOG_FILE%"
+
+echo.
+echo ============================================
+echo Running all SQL files in %SCRIPT_DIR%
+echo Target DB: %DATABASE% on %SERVER%
+echo Logging to: %LOG_FILE%
+echo ============================================
+
+:: === MAIN LOOP ===
+for /f "delims=" %%F in ('dir /b /o:n "%SCRIPT_DIR%*.sql"') do (
+    echo. >> "%LOG_FILE%"
+    echo Executing %%~nxF ... >> "%LOG_FILE%"
+    echo Executing %%~nxF ...
+
+    sqlcmd -S %SERVER% -d %DATABASE% -E -i "%%F" >> "%LOG_FILE%" 2>&1
+
+    if errorlevel 1 (
+        echo Failed: %%~nxF
+        echo Failed: %%~nxF >> "%LOG_FILE%"
+        echo ============================================ >> "%LOG_FILE%"
+        echo ERROR encountered in %%~nxF, stopping batch. >> "%LOG_FILE%"
+        echo ============================================ >> "%LOG_FILE%"
+        exit /b 1
+    ) else (
+        echo Completed: %%~nxF
+        echo Completed: %%~nxF >> "%LOG_FILE%"
+    )
+)
+
+echo ============================================ >> "%LOG_FILE%"
+echo All SQL scripts executed successfully! >> "%LOG_FILE%"
+echo ============================================
+
+echo.
+echo All SQL scripts executed successfully!
+echo Log saved to %LOG_FILE%
+
+endlocal
+pause
