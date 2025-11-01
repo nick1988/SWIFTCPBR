@@ -1,0 +1,75 @@
+// Middleware for correlation ID
+public class CorrelationIdMiddleware
+{
+    private readonly RequestDelegate _next;
+    private const string CorrelationIdHeaderName = "X-Correlation-Id";
+    
+    public CorrelationIdMiddleware(RequestDelegate next)
+    {
+        _next = next;
+    }
+    
+    public async Task InvokeAsync(HttpContext context)
+    {
+        var correlationId = context.Request.Headers[CorrelationIdHeaderName].FirstOrDefault()
+                            ?? Guid.NewGuid().ToString();
+        
+        context.Response.Headers.Add(CorrelationIdHeaderName, correlationId);
+        context.Items["CorrelationId"] = correlationId; // Store for later use
+        
+        using (LogContext.PushProperty("CorrelationId", correlationId))
+        {
+            await _next(context);
+        }
+    }
+}
+
+// Global exception handler
+public class GlobalExceptionHandler : IExceptionHandler
+{
+    private readonly ILogger<GlobalExceptionHandler> _logger;
+    
+    public GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logger)
+    {
+        _logger = logger;
+    }
+    
+    public async ValueTask<bool> TryHandleAsync(
+        HttpContext httpContext,
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        // Correlation ID is already in the log context from middleware
+        _logger.LogError(exception, "An error occurred processing request");
+        
+        var correlationId = httpContext.Items["CorrelationId"]?.ToString();
+        
+        var response = new
+        {
+            Error = "An error occurred",
+            CorrelationId = correlationId,
+            Message = exception.Message
+        };
+        
+        httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        await httpContext.Response.WriteAsJsonAsync(response, cancellationToken);
+        
+        return true; // Exception handled
+    }
+}
+
+// Program.cs
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddControllers();
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddProblemDetails();
+
+var app = builder.Build();
+
+app.UseMiddleware<CorrelationIdMiddleware>();  // First
+app.UseExceptionHandler();                      // Then exception handler
+app.UseAuthorization();
+app.MapControllers();
+
+app.Run();
