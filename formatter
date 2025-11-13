@@ -1,0 +1,19 @@
+    private string FormatPropertyName(string propertyName)
+    {
+        // Insert space before capital letters
+        var result = System.Text.RegularExpressions.Regex.Replace(
+            propertyName, 
+            "([a-z])([A-Z])", 
+            "$1 $2"
+        );
+        
+        // Insert space before numbers
+        result = System.Text.RegularExpressions.Regex.Replace(
+            result,
+            "([a-zA-Z])([0-9])",
+            "$1 $2"
+        );
+        
+        // Capitalize the first letter
+        return char.ToUpper(result[0]) + result.Substring(1);
+    }
