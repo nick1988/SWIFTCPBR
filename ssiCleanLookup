@@ -1,0 +1,137 @@
+public static async Task<PaymentChainDto> GetPaymentChainAsync(
+    INochtaDataAccessAsync dataAccessAsync, 
+    int paymentChainId, 
+    CancellationToken cancellationToken)
+{
+    if (dataAccessAsync == null)
+        throw new ArgumentException("dataAccessAsync value can not be null!");
+
+    SqlParameter[] parameters = [
+        SqlParams.BigInt("@PaymentChainId", paymentChainId)
+    ];
+
+    PaymentChainDto paymentChain = await dataAccessAsync.SelectSingleAsync<PaymentChainDto>(
+        StoredProc_GetPaymentChainForEnrichment, parameters) 
+        ?? throw new InvalidOperationException();
+
+    // Collect all non-null, non-zero SSI IDs
+    var ssiIds = new List<int>();
+    
+    if (paymentChain.DebtorId is > 0) ssiIds.Add(paymentChain.DebtorId.Value);
+    if (paymentChain.DebtorAgentId is > 0) ssiIds.Add(paymentChain.DebtorAgentId.Value);
+    if (paymentChain.InstructedAgentId is > 0) ssiIds.Add(paymentChain.InstructedAgentId.Value);
+    if (paymentChain.IntermediaryAgentId is > 0) ssiIds.Add(paymentChain.IntermediaryAgentId.Value);
+    if (paymentChain.CreditorAgentId is > 0) ssiIds.Add(paymentChain.CreditorAgentId.Value);
+    if (paymentChain.CreditorId is > 0) ssiIds.Add(paymentChain.CreditorId.Value);
+
+    // Fetch all SSIs in ONE database call
+    if (ssiIds.Count > 0)
+    {
+        var ssiList = await GetSSIBatchAsync(dataAccessAsync, ssiIds, paymentChainId, cancellationToken);
+        
+        // Now collect all postal address IDs from the SSIs
+        var addressIds = ssiList
+            .Where(s => s.PostalAddressID is > 0)
+            .Select(s => s.PostalAddressID!.Value)
+            .Distinct()
+            .ToList();
+
+        // Fetch all postal addresses in ONE database call
+        Dictionary<int, PstlAdrDto> addressDict = new();
+        if (addressIds.Count > 0)
+        {
+            var addressList = await GetPostalAddressBatchAsync(dataAccessAsync, addressIds, ssiIds, paymentChainId, cancellationToken);
+            addressDict = addressList.ToDictionary(a => a.AddressId); // Assuming PstlAdrDto has AddressId property
+        }
+
+        // Enrich SSIs with their postal addresses
+        foreach (var ssi in ssiList)
+        {
+            if (ssi.PostalAddressID.HasValue && addressDict.TryGetValue(ssi.PostalAddressID.Value, out var address))
+            {
+                ssi.PostalAddress = address;
+            }
+        }
+
+        // Convert enriched SSIs to dictionary for fast lookups
+        var ssiDict = ssiList.ToDictionary(s => s.SsiId);
+        
+        // Assign to payment chain
+        paymentChain.Debtor = TryGetSsi(ssiDict, paymentChain.DebtorId);
+        paymentChain.DebtorAgent = TryGetSsi(ssiDict, paymentChain.DebtorAgentId);
+        paymentChain.InstructedAgent = TryGetSsi(ssiDict, paymentChain.InstructedAgentId);
+        paymentChain.IntermediaryAgent = TryGetSsi(ssiDict, paymentChain.IntermediaryAgentId);
+        paymentChain.CreditorAgent = TryGetSsi(ssiDict, paymentChain.CreditorAgentId);
+        paymentChain.Creditor = TryGetSsi(ssiDict, paymentChain.CreditorId);
+    }
+
+    return paymentChain;
+}
+
+private static SsiDto? TryGetSsi(Dictionary<int, SsiDto> ssiDict, int? ssiId)
+{
+    return ssiId.HasValue && ssiDict.TryGetValue(ssiId.Value, out var ssi) ? ssi : null;
+}
+
+private static async Task<List<SsiDto>> GetSSIBatchAsync(
+    INochtaDataAccessAsync dataAccessAsync,
+    List<int> ssiIds,
+    int paymentChainId,
+    CancellationToken cancellationToken)
+{
+    DataTable idsTable = new DataTable();
+    idsTable.Columns.Add("Id", typeof(int));
+    foreach (var id in ssiIds)
+    {
+        idsTable.Rows.Add(id);
+    }
+
+    SqlParameter[] parameters = [
+        new SqlParameter("@SsiIds", SqlDbType.Structured) 
+        { 
+            TypeName = "dbo.IntListType",
+            Value = idsTable 
+        },
+        SqlParams.BigInt("@PaymentChainId", paymentChainId)
+    ];
+
+    return await dataAccessAsync.SelectAsync<SsiDto>("StoredProc_GetSSIBatch", parameters);
+}
+
+private static async Task<List<PstlAdrDto>> GetPostalAddressBatchAsync(
+    INochtaDataAccessAsync dataAccessAsync,
+    List<int> addressIds,
+    List<int> ssiIds,
+    int paymentChainId,
+    CancellationToken cancellationToken)
+{
+    DataTable addressIdsTable = new DataTable();
+    addressIdsTable.Columns.Add("Id", typeof(int));
+    foreach (var id in addressIds)
+    {
+        addressIdsTable.Rows.Add(id);
+    }
+
+    DataTable ssiIdsTable = new DataTable();
+    ssiIdsTable.Columns.Add("Id", typeof(int));
+    foreach (var id in ssiIds)
+    {
+        ssiIdsTable.Rows.Add(id);
+    }
+
+    SqlParameter[] parameters = [
+        new SqlParameter("@AddressIds", SqlDbType.Structured) 
+        { 
+            TypeName = "dbo.IntListType",
+            Value = addressIdsTable 
+        },
+        new SqlParameter("@SsiIds", SqlDbType.Structured) 
+        { 
+            TypeName = "dbo.IntListType",
+            Value = ssiIdsTable 
+        },
+        SqlParams.BigInt("@PaymentChainId", paymentChainId)
+    ];
+
+    return await dataAccessAsync.SelectAsync<PstlAdrDto>("StoredProc_GetSSIAddressBatch", parameters);
+}
